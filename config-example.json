@@ -1,0 +1,11 @@
+{
+  "domains": {
+    "<domain name>": {
+      "subdomains": []
+    }
+  },
+  "timeout": "5s",
+  "email": "",
+  "api_token": "",
+  "zone_id": ""
+}
