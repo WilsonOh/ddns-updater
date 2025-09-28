@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func getLogLevel() slog.Level {
+func getLogLevelFromEnv() slog.Level {
 	levelStr := os.Getenv("LOG_LEVEL")
 	switch strings.ToUpper(levelStr) {
 	case "DEBUG":
@@ -22,9 +22,9 @@ func getLogLevel() slog.Level {
 	}
 }
 
-func InitLogger() {
+func Init() {
 	opts := &slog.HandlerOptions{
-		Level: getLogLevel(),
+		Level: getLogLevelFromEnv(),
 	}
 	handler := slog.NewJSONHandler(os.Stdout, opts)
 	logger := slog.New(handler)

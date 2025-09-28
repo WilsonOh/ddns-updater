@@ -32,7 +32,7 @@ func getTimeTaken(start time.Time) string {
 }
 
 func main() {
-	logger.InitLogger()
+	logger.Init()
 
 	cfg, err := config.Get()
 	if err != nil {
