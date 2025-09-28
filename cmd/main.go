@@ -4,9 +4,11 @@ import (
 	"context"
 	"ddns-go/internal/config"
 	"ddns-go/internal/ddns"
+	"ddns-go/internal/logger"
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -24,12 +26,14 @@ func handleSigs(cancel func()) {
 	cancel()
 }
 
-func reportTime(name string, start time.Time) {
+func getTimeTaken(start time.Time) string {
 	timeTaken := time.Since(start)
-	fmt.Printf("%s took %fs to complete\n", name, timeTaken.Seconds())
+	return fmt.Sprintf("%fs", timeTaken.Seconds())
 }
 
 func main() {
+	logger.InitLogger()
+
 	cfg, err := config.Get()
 	if err != nil {
 		log.Fatalf("failed to retrieve config: %v", err)
@@ -52,32 +56,38 @@ func main() {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		defer reportTime("get public ip address", time.Now())
+		start := time.Now()
 		ipAddr, err = ddns.GetPublicIPAddress()
 		if err != nil {
-			log.Fatalf("failed to get IP: %v", err)
+			slog.Error("failed to get IP", slog.Any("error", err))
+			os.Exit(1)
 		}
+		slog.Info("fetched current public IP address", slog.String("ip address", ipAddr), slog.String("time_taken", getTimeTaken(start)))
 	}()
 
 	go func() {
 		defer wg.Done()
-		defer reportTime("fetch A records", time.Now())
+		start := time.Now()
 		records, err = ddns.FetchARecordsToUpdate(ctx, client, cfg)
 		if err != nil {
-			log.Fatalf("failed to fetch A records: %v", err)
+			slog.Error("failed to fetch A records", slog.Any("error", err))
+			os.Exit(1)
 		}
+		slog.Info("fetched records to update", slog.Any("records", records), slog.String("time_taken", getTimeTaken(start)))
 	}()
 	wg.Wait()
 
 	params := ddns.AssembleBatchUpdateParams(cfg, records, ipAddr)
+	if len(params) == 0 {
+		slog.Info("skipping batch update as no records need to be updated")
+		os.Exit(0)
+	}
 	res, err := ddns.BatchUpdateDDNSRecords(ctx, cfg, client, params)
 	if err != nil {
-		log.Fatalf("failed to make batch patch request: %v", err)
+		slog.Error("failed to make batch patch request", slog.Any("error", err))
 	}
 
-	defer reportTime("batch update records", time.Now())
-	fmt.Printf("Batch update successful.")
-	fmt.Printf("Updated records: \n")
-	formatted, _ := json.MarshalIndent(res, "", "  ")
-	fmt.Printf("%s\n", string(formatted))
+	start := time.Now()
+	formattedResp, _ := json.MarshalIndent(res, "", "  ")
+	slog.Info("Batch update successful.", slog.Any("records", formattedResp), slog.String("time_taken", getTimeTaken(start)))
 }
