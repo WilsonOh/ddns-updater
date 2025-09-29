@@ -1,111 +1,61 @@
 package metrics
 
 import (
-	"os"
-	"runtime"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-// MetricsRecorder interface for recording metrics
+const (
+	namespace = "ddns_updater"
+	jobName   = "ddns_updater"
+)
+
+var (
+	runsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "runs_total",
+			Help:      "Total number of DDNS updater runs",
+		},
+		[]string{"status", "error_message"},
+	)
+
+	runDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Name:      "run_duration_seconds",
+			Help:      "Duration of DDNS updater runs",
+			Buckets:   []float64{0.1, 0.5, 1, 2, 5, 10, 30},
+		},
+		[]string{},
+	)
+
+	ipChanges = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Name:      "ip_changes_total",
+			Help:      "Total number of IP address changes detected",
+		},
+		[]string{"old_ip", "new_ip", "hostname"},
+	)
+)
+
 type MetricsRecorder interface {
-	RecordRun(status string)
+	RecordRun(status string, duration time.Duration, err error)
 	RecordIPChange(oldIP, newIP string)
-	RecordIPFetch(duration time.Duration, success bool)
-	RecordDNSRecord(action, domain string)
-	RecordDNSUpdate(duration time.Duration, success bool)
-	RecordCloudflareAPI(operation string, duration time.Duration, err error)
-	SetBuildInfo(version, goVersion string)
-	Push() error // Push metrics to Push Gateway
+	Push() error
 }
 
-// MetricsConfig holds configuration for Push Gateway metrics
-type MetricsConfig struct {
-	Enabled        bool
-	PushGatewayURL string
-	PushGatewayJob string
-	Version        string
+func Init() {
+	prometheus.DefaultRegisterer.MustRegister(
+		runsTotal, runDuration, ipChanges,
+	)
 }
 
-// NewRecorder creates a Push Gateway metrics recorder
-func NewRecorder(config MetricsConfig) MetricsRecorder {
-	if !config.Enabled || config.PushGatewayURL == "" {
-		return &NoOpRecorder{}
+func NewRecorder(config *MetricsConfig) MetricsRecorder {
+	if !config.Enabled {
+		return NewNoopMetricsRecorder()
 	}
-
-	return &PushGatewayRecorder{
-		recorder: NewRunRecorder(),
-		config:   config,
-	}
-}
-
-// LoadConfigFromEnv loads metrics configuration from environment variables
-func LoadConfigFromEnv() MetricsConfig {
-	return MetricsConfig{
-		Enabled:        os.Getenv("METRICS_ENABLED") == "true",
-		PushGatewayURL: os.Getenv("PUSHGATEWAY_URL"),
-		PushGatewayJob: getEnvWithDefault("PUSHGATEWAY_JOB", "ddns-updater"),
-		Version:        getEnvWithDefault("VERSION", "unknown"),
-	}
-}
-
-func getEnvWithDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-// PushGatewayRecorder wraps RunRecorder for Push Gateway
-type PushGatewayRecorder struct {
-	recorder *RunRecorder
-	config   MetricsConfig
-}
-
-func (p *PushGatewayRecorder) RecordRun(status string) {
-	p.recorder.RecordRun(status)
-}
-
-func (p *PushGatewayRecorder) RecordIPChange(oldIP, newIP string) {
-	p.recorder.RecordIPChange(oldIP, newIP)
-}
-
-func (p *PushGatewayRecorder) RecordIPFetch(duration time.Duration, success bool) {
-	p.recorder.RecordIPFetch(duration, success)
-}
-
-func (p *PushGatewayRecorder) RecordDNSRecord(action, domain string) {
-	p.recorder.RecordDNSRecord(action, domain)
-}
-
-func (p *PushGatewayRecorder) RecordDNSUpdate(duration time.Duration, success bool) {
-	p.recorder.RecordDNSUpdate(duration, success)
-}
-
-func (p *PushGatewayRecorder) RecordCloudflareAPI(operation string, duration time.Duration, err error) {
-	p.recorder.RecordCloudflareAPI(operation, duration, err)
-}
-
-func (p *PushGatewayRecorder) SetBuildInfo(version, goVersion string) {
-	SetBuildInfo(version, goVersion)
-}
-
-func (p *PushGatewayRecorder) Push() error {
-	return p.recorder.PushMetrics(p.config.PushGatewayURL, p.config.PushGatewayJob)
-}
-
-// NoOpRecorder does nothing when metrics are disabled
-type NoOpRecorder struct{}
-
-func (n *NoOpRecorder) RecordRun(status string)                                                 {}
-func (n *NoOpRecorder) RecordIPChange(oldIP, newIP string)                                      {}
-func (n *NoOpRecorder) RecordIPFetch(duration time.Duration, success bool)                      {}
-func (n *NoOpRecorder) RecordDNSRecord(action, domain string)                                   {}
-func (n *NoOpRecorder) RecordDNSUpdate(duration time.Duration, success bool)                    {}
-func (n *NoOpRecorder) RecordCloudflareAPI(operation string, duration time.Duration, err error) {}
-func (n *NoOpRecorder) SetBuildInfo(version, goVersion string)                                  {}
-func (n *NoOpRecorder) Push() error                                                             { return nil }
-
-// Helper to initialize build info
-func InitializeBuildInfo(recorder MetricsRecorder, version string) {
-	recorder.SetBuildInfo(version, runtime.Version())
+	return NewPushGatewatMetricsRecorder(config)
 }
